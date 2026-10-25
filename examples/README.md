@@ -1,10 +1,10 @@
 # Example: Auth Sample Test Plans
 
-Seven minimal, runnable JMeter test plans, one per supported provider, all
-following the same shape. See `../docs/SETUP.md` first for prerequisites
-and each provider's config format — Cognito needs AWS SDK jars and an SSM
-parameter; every other provider needs neither, just `-J` properties
-(below).
+Eight minimal, runnable JMeter test plans, one per supported provider plus
+a generic catch-all, all following the same shape. See `../docs/SETUP.md`
+first for prerequisites and each provider's config format — Cognito needs
+AWS SDK jars and an SSM parameter; every other provider needs neither,
+just `-J` properties (below).
 
 | Plan                          | Auth script                       |
 |--------------------------------|--------------------------------------|
@@ -15,8 +15,9 @@ parameter; every other provider needs neither, just `-J` properties
 | `keycloak_auth_sample.jmx`     | `../scripts/keycloak_auth.groovy`   |
 | `ping_auth_sample.jmx`         | `../scripts/ping_auth.groovy`       |
 | `firebase_auth_sample.jmx`     | `../scripts/firebase_auth.groovy`   |
+| `generic_oauth2_auth_sample.jmx` | `../scripts/generic_oauth2_auth.groovy` |
 
-## Structure (same in all seven)
+## Structure (same in all eight)
 
 - **`<Provider> Auth`** (JSR223 Sampler, runs the provider's auth script)
   Logs in once (shared across all threads/iterations) and stores
@@ -44,7 +45,7 @@ parameter; every other provider needs neither, just `-J` properties
     fails if the token was missing, the status wasn't 2xx, the body was
     empty, or the body contains auth-failure text despite a 2xx status.
     This assertion is provider-agnostic, so it's identical across all
-    seven plans.
+    eight plans.
 - **View Results Tree**: for inspecting requests/responses while you're
   getting things working. Remove or disable it for real load runs.
 
@@ -69,6 +70,10 @@ the test plan) to point at your real API:
   **required**
 - **Firebase**: `firebase.apiKey`, `firebase.email`, `firebase.password`
   are **required**
+- **Generic OAuth2/OIDC**: `oauth2.tokenUrl`, `oauth2.clientId`,
+  `oauth2.clientSecret` are **required** for the default `authStyle=basic`;
+  set `oauth2.authStyle=body` for providers that expect the client ID/secret
+  as form fields instead (Auth0-style)
 
 All of the above throw a clear "Missing required JMeter property" error at
 script start if omitted — see `../docs/SETUP.md` §4 for the full property
@@ -113,6 +118,12 @@ jmeter -n -t examples/firebase_auth_sample.jmx \
   -Jfirebase.apiKey=xxxxxxxxxxxx \
   -Jfirebase.email=someuser@example.com \
   -Jfirebase.password='YourPassword123!'
+
+jmeter -n -t examples/generic_oauth2_auth_sample.jmx \
+  -Joauth2.tokenUrl=https://your-provider.example.com/oauth/token \
+  -Joauth2.clientId=xxxxxxxxxxxx \
+  -Joauth2.clientSecret=xxxxxxxxxxxx \
+  -Joauth2.authStyle=body
 ```
 
 Or open one in the JMeter GUI (`jmeter -t examples/<plan>.jmx`) for a first

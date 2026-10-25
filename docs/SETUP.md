@@ -2,8 +2,9 @@
 
 This describes how the scripts in `scripts/` are actually used in this repo:
 as JSR223 script files referenced from a JMeter test plan, not as a compiled
-JMeter plugin. Seven providers are supported, each with its own script but
-the same shape:
+JMeter plugin. Seven named providers are supported, each with its own
+script but the same shape, plus a generic OAuth2/OIDC script that covers
+any other standard provider:
 
 | Provider              | Script                          | Sample plan                              |
 |------------------------|-----------------------------------|--------------------------------------------|
@@ -14,12 +15,13 @@ the same shape:
 | Keycloak                | `scripts/keycloak_auth.groovy`  | `examples/keycloak_auth_sample.jmx`       |
 | PingFederate / PingOne  | `scripts/ping_auth.groovy`      | `examples/ping_auth_sample.jmx`           |
 | Google Identity Platform / Firebase Auth | `scripts/firebase_auth.groovy` | `examples/firebase_auth_sample.jmx` |
+| Any other OAuth2/OIDC provider | `scripts/generic_oauth2_auth.groovy` | `examples/generic_oauth2_auth_sample.jmx` |
 
-All seven log in once per test run (shared across threads/iterations — see
-[§5](#5-how-the-login-is-shared-across-the-test)) and export `access_token`
-as a JMeter variable, so `scripts/globalassertion.groovy` and the
-`Authorization: Bearer ${access_token}` header pattern work the same way
-regardless of provider.
+All of them log in once per test run (shared across threads/iterations —
+see [§5](#5-how-the-login-is-shared-across-the-test)) and export
+`access_token` as a JMeter variable, so `scripts/globalassertion.groovy`
+and the `Authorization: Bearer ${access_token}` header pattern work the
+same way regardless of provider.
 
 ## 1. Prerequisites
 
@@ -198,6 +200,32 @@ endpoint directly, the same call the Firebase Auth SDKs make. It exports
 Firebase's `idToken` as `access_token` to match this repo's
 `Authorization: Bearer ${access_token}` convention, plus `refresh_token`.
 
+### Any other OAuth2/OIDC provider (generic script)
+
+`scripts/generic_oauth2_auth.groovy` is a catch-all for a standard OAuth2
+token endpoint this repo doesn't already have a named script for —
+Salesforce, a generic OIDC provider, an in-house auth server, etc. It's
+the same underlying call shape as the named scripts above, with the
+provider-specific bits (URL, client-auth style, field names) exposed as
+config instead of hardcoded:
+
+| Property               | Required? | Purpose                                   |
+|--------------------------|-----------|----------------------------------------------|
+| `oauth2.tokenUrl`        | **yes**   | Full token endpoint URL                     |
+| `oauth2.clientId`        | **yes**   | Client ID                                   |
+| `oauth2.clientSecret`    | no\*      | \*Required unless `authStyle=body` and the client is public |
+| `oauth2.grantType`       | no        | `client_credentials` (default) or `password` |
+| `oauth2.authStyle`       | no        | `basic` (default, HTTP Basic auth header — Okta/Ping style) or `body` (client_id/secret as form fields — Auth0 style) |
+| `oauth2.scope`           | no        | Space-separated scopes; only sent if set    |
+| `oauth2.audience`        | no        | Only sent if set (some providers require it) |
+| `oauth2.username`        | if `grantType=password` | End-user username |
+| `oauth2.password`        | if `grantType=password` | End-user password |
+| `oauth2.tokenField`      | no        | Which JSON response field holds the bearer token (default `access_token`) |
+| `oauth2.extraParams`     | no        | JSON object string of extra form fields a quirky provider needs, e.g. `'{"realm":"my-realm"}'` |
+
+This is also the quickest way to try a provider before deciding whether
+it's worth a named script of its own.
+
 ### Examples
 
 ```bash
@@ -239,6 +267,12 @@ jmeter -n -t examples/firebase_auth_sample.jmx \
   -Jfirebase.apiKey=xxxxxxxxxxxx \
   -Jfirebase.email=someuser@example.com \
   -Jfirebase.password='YourPassword123!'
+
+jmeter -n -t examples/generic_oauth2_auth_sample.jmx \
+  -Joauth2.tokenUrl=https://your-provider.example.com/oauth/token \
+  -Joauth2.clientId=xxxxxxxxxxxx \
+  -Joauth2.clientSecret=xxxxxxxxxxxx \
+  -Joauth2.authStyle=body
 ```
 
 ## 5. How the login is shared across the test
@@ -300,6 +334,9 @@ real:
 - **Firebase**: `POST https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=<apiKey>`
   with body `{"idToken": "${access_token}"}` returns the user's account
   info if the token is valid.
+- **Generic**: check your provider's own `/userinfo` or equivalent
+  endpoint (often published at
+  `<issuer>/.well-known/openid-configuration` as `userinfo_endpoint`).
 
 See `examples/README.md` for how everything above is wired together in the
 sample test plans.

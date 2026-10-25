@@ -1,13 +1,13 @@
-# JMeter Auth Scripts (Cognito / Auth0 / Okta / Entra ID / Keycloak / Ping / Firebase)
+# JMeter Auth Scripts (Cognito / Auth0 / Okta / Entra ID / Keycloak / Ping / Firebase / generic OAuth2)
 
-Groovy scripts for load testing authenticated APIs in Apache JMeter, across seven providers: **Amazon Cognito**, **Auth0**, **Okta**, **Microsoft Entra ID (Azure AD)**, **Keycloak**, **PingFederate/PingOne**, and **Google Identity Platform/Firebase Auth**. Instead of a compiled JMeter plugin, this repo uses **JSR223 Sampler/Assertion elements** that run the Groovy scripts directly — no build step, no jar to install, just script files referenced from your test plan.
+Groovy scripts for load testing authenticated APIs in Apache JMeter, across seven named providers — **Amazon Cognito**, **Auth0**, **Okta**, **Microsoft Entra ID (Azure AD)**, **Keycloak**, **PingFederate/PingOne**, and **Google Identity Platform/Firebase Auth** — plus a generic OAuth2/OIDC script that covers any other standard provider. Instead of a compiled JMeter plugin, this repo uses **JSR223 Sampler/Assertion elements** that run the Groovy scripts directly — no build step, no jar to install, just script files referenced from your test plan.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 ## Features
 
 - **Cognito** (`scripts/cognito_auth.groovy`): full `USER_SRP_AUTH` handshake, including `PASSWORD_VERIFIER` and `NEW_PASSWORD_REQUIRED` challenges; config from AWS SSM Parameter Store
-- **Auth0, Okta, Entra ID, Keycloak, Ping, Firebase**: standard OAuth2/OIDC (or, for Firebase, the Identity Toolkit REST API) — Client Credentials grant by default where supported (no end-user password needed), or Resource Owner Password grant via config; config from plain JMeter properties, no AWS dependency
+- **Auth0, Okta, Entra ID, Keycloak, Ping, Firebase, and any other provider via the generic script**: standard OAuth2/OIDC (or, for Firebase, the Identity Toolkit REST API) — Client Credentials grant by default where supported (no end-user password needed), or Resource Owner Password grant via config; config from plain JMeter properties, no AWS dependency
 - Login happens **once per test run**, not once per request: the token is cached in shared JMeter properties (`props`) behind a `synchronized` check, so every thread and every loop iteration reuses it instead of re-authenticating
 - `access_token` (Cognito and Firebase also: `refresh_token`; Cognito also: `id_token`) exposed as JMeter variables for use in subsequent samplers (e.g. `Authorization: Bearer ${access_token}`)
 - A single, provider-agnostic JSR223 Assertion (`scripts/globalassertion.groovy`) that verifies a request truly succeeded — a token was actually issued, the response was 2xx, the body wasn't empty, and it doesn't contain auth-failure text under a misleading 200
@@ -16,7 +16,7 @@ Groovy scripts for load testing authenticated APIs in Apache JMeter, across seve
 
 - Java 11+
 - Apache JMeter 5.6+
-- An account with the provider(s) you're testing against (Cognito User Pool, Auth0 tenant, Okta org, Entra ID tenant, Keycloak realm, PingFederate/PingOne environment, and/or a Firebase/Identity Platform project)
+- An account with the provider(s) you're testing against (Cognito User Pool, Auth0 tenant, Okta org, Entra ID tenant, Keycloak realm, PingFederate/PingOne environment, a Firebase/Identity Platform project, and/or any other OAuth2/OIDC provider's token endpoint)
 - **Cognito only**: AWS SDK for Java v2 jars (see below) to read config from SSM and talk to Cognito. No Maven build required, these are just downloaded and dropped into JMeter's `lib` directory. Every other provider needs no extra jars — they use Java's built-in HTTP client.
 
 ## Setup
@@ -24,7 +24,7 @@ Groovy scripts for load testing authenticated APIs in Apache JMeter, across seve
 Full walkthrough — AWS SDK jars, IAM permissions, Cognito's SSM parameter JSON shape, all property names — is in [`docs/SETUP.md`](docs/SETUP.md). Short version:
 
 1. **Cognito**: place the AWS SDK v2 jars (`cognitoidentityprovider`, `ssm`, `auth`, `regions`, `sdk-core`, an HTTP client, `jackson-*`) in `JMETER_HOME/lib`, restart JMeter, make sure AWS credentials with `ssm:GetParameter` + `cognito-idp:InitiateAuth`/`RespondToAuthChallenge` are available, and store your Cognito config as a String-type JSON parameter in SSM.
-2. **Everything else** (Auth0, Okta, Entra ID, Keycloak, Ping, Firebase): nothing to provision — pass config directly as JMeter `-J` properties (see below).
+2. **Everything else** (Auth0, Okta, Entra ID, Keycloak, Ping, Firebase, or any other provider via the generic script): nothing to provision — pass config directly as JMeter `-J` properties (see below).
 
 ## Configuration
 
@@ -57,15 +57,19 @@ scripts throw a clear error at startup if a required one is missing.
 | Firebase    | `firebase.apiKey`        | **yes**   | Web API key                                                    |
 | Firebase    | `firebase.email`         | **yes**   | Test user's email                                              |
 | Firebase    | `firebase.password`      | **yes**   | Test user's password                                           |
+| Generic     | `oauth2.tokenUrl`        | **yes**   | Full token endpoint URL for any other provider                |
+| Generic     | `oauth2.clientId`        | **yes**   | Client ID                                                      |
+| Generic     | `oauth2.clientSecret`    | **yes**\* | \*Required for the default `authStyle=basic`                  |
 
 See `docs/SETUP.md` §4 for the full list including optional overrides
-(`grantType`, `scope`, `authServerId`, `clientSecret` for Keycloak, etc.).
+(`grantType`, `scope`, `authServerId`, `clientSecret` for Keycloak,
+`authStyle`/`tokenField`/`extraParams` for the generic script, etc.).
 
 Pass these on the command line with `-J`, e.g. `-Jauth0.domain=your-tenant.auth0.com -Jauth0.clientId=... -Jauth0.clientSecret=... -Jauth0.audience=...`.
 
 ## Usage
 
-1. Add a **JSR223 Sampler** as the first sampler in your Thread Group (outside any loop), pointing its "Script File" at the auth script for your provider (`scripts/cognito_auth.groovy`, `scripts/auth0_auth.groovy`, `scripts/okta_auth.groovy`, `scripts/entra_id_auth.groovy`, `scripts/keycloak_auth.groovy`, `scripts/ping_auth.groovy`, or `scripts/firebase_auth.groovy`). It stores `access_token` (and, for Cognito, `id_token`/`refresh_token`; for Firebase, `refresh_token`) as JMeter variables.
+1. Add a **JSR223 Sampler** as the first sampler in your Thread Group (outside any loop), pointing its "Script File" at the auth script for your provider (`scripts/cognito_auth.groovy`, `scripts/auth0_auth.groovy`, `scripts/okta_auth.groovy`, `scripts/entra_id_auth.groovy`, `scripts/keycloak_auth.groovy`, `scripts/ping_auth.groovy`, `scripts/firebase_auth.groovy`, or `scripts/generic_oauth2_auth.groovy` for anything else). It stores `access_token` (and, for Cognito, `id_token`/`refresh_token`; for Firebase, `refresh_token`) as JMeter variables.
 2. Add an **HTTP Header Manager** using `Authorization: Bearer ${access_token}` for the requests that follow.
 3. Attach a **JSR223 Assertion** pointing at `scripts/globalassertion.groovy` to your protected-request samplers to confirm they truly succeeded, not just that they didn't throw. This assertion is the same regardless of provider.
 
@@ -82,7 +86,7 @@ See [`examples/`](examples/) for a complete, runnable sample test plan per provi
 
 ### Authentication Failures
 - Cognito: verify AWS credentials are properly configured and can reach SSM/Cognito, the SSM parameter JSON matches the expected shape (see `docs/SETUP.md`), User Pool client settings are correct (SRP auth flow enabled, client secret correct), and the user exists with a password meeting requirements
-- Auth0/Okta/Entra ID/Keycloak/Ping/Firebase: check for a "Missing required JMeter property" error first — the script fails fast on that instead of a confusing HTTP error; then check the app/client is authorized for the grant type in use (Client Credentials apps need the API/authorization server explicitly granted; Resource Owner Password is often disabled by default and, for Entra ID, doesn't work with personal accounts or MFA)
+- Auth0/Okta/Entra ID/Keycloak/Ping/Firebase/generic: check for a "Missing required JMeter property" error first — the script fails fast on that instead of a confusing HTTP error; then check the app/client is authorized for the grant type in use (Client Credentials apps need the API/authorization server explicitly granted; Resource Owner Password is often disabled by default and, for Entra ID, doesn't work with personal accounts or MFA). For the generic script specifically, also double-check `oauth2.authStyle` matches how your provider expects the client to authenticate (`basic` vs `body`) — a mismatch usually comes back as an opaque 401.
 
 ### Performance Considerations
 - Each auth script is designed to run once per test (shared across threads via `props`); make sure it's placed outside any loop so it isn't accidentally re-run per iteration
